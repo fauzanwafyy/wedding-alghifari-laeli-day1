@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { loadGas } from "./gas-emulator.mjs";
 
 const post = (gas, body) => JSON.parse(gas.ctx.doPost({ postData: { contents: JSON.stringify(body) } }).getContent());
-const get = (gas, action = "wishes") => JSON.parse(gas.ctx.doGet({ parameter: { action } }).getContent());
+const get = (gas, action = "wishes", extra = {}) => JSON.parse(gas.ctx.doGet({ parameter: { action, ...extra } }).getContent());
 const base = (over = {}) => ({
   action: "rsvp", submissionId: `t-${Math.random().toString(36).slice(2, 12)}`, invitationSlug: "pujo-partner",
   guestName: "Pujo", attendance: "attending", guestCount: 2, message: "Selamat ya!", website: "", ...over,
@@ -162,4 +162,54 @@ test("removeTestRows() deletes only selftest/qa-test rows", () => {
   const names = gas.sheets.get("RSVP").rows.slice(1).map((r) => r[2]);
   assert.deepEqual(names, ["Tamu Asli", "Tamu Asli Dua"]);
   assert.deepEqual(get(gas).wishes.map((w) => w.name), ["Tamu Asli Dua", "Tamu Asli"]);
+});
+
+test("one tab per invitation: Day 1 → 'RSVP Day 1', no event → Day 2 tab 'RSVP'", () => {
+  const gas = loadGas();
+  post(gas, base({ guestName: "Tamu Day Dua", message: "Untuk akad" }));
+  post(gas, base({ event: "day1", guestName: "Tamu Day Satu", message: "Untuk resepsi" }));
+  post(gas, base({ event: "DAY1", guestName: "Tamu Lain", message: "Huruf besar juga" }));
+  assert.deepEqual(gas.sheets.get("RSVP").rows.slice(1).map((r) => r[2]), ["Tamu Day Dua"]);
+  assert.deepEqual(gas.sheets.get("RSVP Day 1").rows.slice(1).map((r) => r[2]), ["Tamu Lain", "Tamu Day Satu"].reverse());
+  gas.cacheStore.clear();
+  const d1 = get(gas, "wishes", { event: "day1" });
+  assert.equal(d1.event, "day1");
+  assert.deepEqual(d1.wishes.map((w) => w.name), ["Tamu Lain", "Tamu Day Satu"]);
+  const d2 = get(gas);
+  assert.equal(d2.event, "day2");
+  assert.deepEqual(d2.wishes.map((w) => w.name), ["Tamu Day Dua"]);
+  assert.deepEqual(get(gas, "ping").events, ["day2", "day1"]);
+});
+
+test("unknown event is rejected and creates no tab", () => {
+  const gas = loadGas();
+  const r = post(gas, base({ event: "day3" }));
+  assert.equal(r.ok, false);
+  assert.equal(r.field, "event");
+  const w = get(gas, "wishes", { event: "../RSVP" });
+  assert.equal(w.ok, false);
+  assert.deepEqual([...gas.sheets.keys()], []);
+});
+
+test("duplicates and wishes cache are per invitation", () => {
+  const gas = loadGas();
+  const same = { guestName: "Pujo", message: "Selamat ya!" };
+  assert.equal(post(gas, base({ ...same, submissionId: "dup-aaaaaaa1" })).status, "created");
+  // the same person sending the same wish to the other invitation is NOT a duplicate
+  assert.equal(post(gas, base({ ...same, event: "day1", submissionId: "dup-bbbbbbb2" })).status, "created");
+  assert.equal(get(gas).total, 1);
+  assert.equal(get(gas, "wishes", { event: "day1" }).total, 1);
+  post(gas, base({ event: "day1", guestName: "Budi", message: "Barakallah" }));
+  assert.equal(get(gas, "wishes", { event: "day1" }).total, 2, "posting clears that invitation's cache");
+});
+
+test("setup() creates and formats every tab, keeping existing RSVPs", () => {
+  const gas = loadGas();
+  post(gas, base({ guestName: "Sudah Ada" }));
+  gas.ctx.setup();
+  assert.deepEqual([...gas.sheets.keys()].sort(), ["RSVP", "RSVP Day 1"]);
+  assert.equal(gas.sheets.get("RSVP").rows[1][2], "Sudah Ada");
+  assert.equal(gas.sheets.get("RSVP Day 1").rows.length, 1, "Day 1 tab: header only");
+  gas.ctx.removeTestRows();
+  assert.equal(gas.sheets.get("RSVP").rows.length, 2);
 });

@@ -20,7 +20,7 @@ Google Sheet through a Google Apps Script Web App. No framework, no build step.
 |---|---|
 | Change names, times, bank details, guests | [`docs/MAINTENANCE.md`](docs/MAINTENANCE.md) |
 | Replace, add or remove photos | [`docs/PHOTO-REPLACEMENT-GUIDE.md`](docs/PHOTO-REPLACEMENT-GUIDE.md) |
-| RSVP Google Sheet + Apps Script (Day 1's own sheet; setup, moderation, updates) | [`docs/GOOGLE-SHEETS.md`](docs/GOOGLE-SHEETS.md) |
+| RSVP Google Sheet + Apps Script (shared with Day 2, own tab "RSVP Day 1"; setup, moderation, updates) | [`docs/GOOGLE-SHEETS.md`](docs/GOOGLE-SHEETS.md) |
 | Publish / update GitHub Pages, custom domain | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) |
 | Generate personal guest links + WhatsApp text | open `generator.html` on the live site |
 

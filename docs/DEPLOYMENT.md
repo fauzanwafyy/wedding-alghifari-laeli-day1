@@ -96,12 +96,12 @@ Hard-refresh (or add `?v=2` to the URL) if the browser shows an old version.
 
 ## 7. Pre-launch checklist
 
-- [ ] Day 1 RSVP sheet + Apps Script deployed and its `/exec` URL in `js/config.js` →
-      `rsvp.apiUrl` (see `GOOGLE-SHEETS.md`); `?action=ping` answers `{"ok":true,…}`
+- [ ] Shared RSVP script updated in the Day 2 spreadsheet (paste `Code.gs`, Save, `setup`,
+      New version; see `GOOGLE-SHEETS.md`); `?action=ping` lists `"day1"` under `events`
 - [x] Live address set in `index.html` (4 places) and `site.url`
 - [ ] GitHub Pages turned on for `wedding-alghifari-laeli-day1` (`main`, `/ (root)`)
 - [ ] Open a guest link on an iPhone and an Android phone: cover → open → music → RSVP
 - [ ] Submit one real-phone test RSVP with Invitation Slug `qa-test`
-      (e.g. `…/?to=qa-test`), check it lands in the **Day 1** sheet (not Day 2), then run
+      (e.g. `…/?to=qa-test`), check it lands in the **RSVP Day 1** tab (not **RSVP**), then run
       `removeTestRows` in Apps Script
 - [ ] Share a link in WhatsApp and check the preview image and title

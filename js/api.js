@@ -4,6 +4,9 @@
  * - POST uses Content-Type text/plain so the browser sends a "simple" request
  *   (no CORS preflight, which Apps Script can't answer). The body is still JSON.
  * - GET returns only public data: { name, message } per wish.
+ * - `rsvp.event` picks this invitation's tab in the shared spreadsheet. Before
+ *   the first RSVP is sent, the server must confirm it knows that event (an
+ *   older script would otherwise file it under the default tab).
  */
 (function (AWL) {
   "use strict";
@@ -15,6 +18,7 @@
 
   const apiUrl = () => (rsvp.apiUrl || "").trim();
   const isApiConfigured = () => URL_PATTERN.test(apiUrl());
+  const eventKey = () => (rsvp.event || "").trim();
 
   class ApiError extends Error {
     constructor(kind, message, detail) {
@@ -50,19 +54,48 @@
     return data;
   }
 
-  function getWishes() {
-    if (!isApiConfigured()) return Promise.reject(new ApiError("config", "RSVP belum dikonfigurasi."));
+  const notReady = () => new ApiError("config", "RSVP belum dikonfigurasi.");
+
+  function getUrl(action) {
     const u = new URL(apiUrl());
-    u.searchParams.set("action", "wishes");
+    u.searchParams.set("action", action);
+    if (eventKey()) u.searchParams.set("event", eventKey());
     u.searchParams.set("_", String(Date.now())); // defeat intermediary caches
-    return call(u.toString(), { method: "GET" });
+    return u.toString();
   }
 
-  function submitRsvp(payload) {
+  /** Resolves once the server has confirmed it stores this invitation's RSVPs in their own tab. */
+  let eventConfirmed = null;
+  function confirmEvent() {
+    const key = eventKey();
+    if (!key) return Promise.resolve();
+    if (!eventConfirmed) {
+      eventConfirmed = call(getUrl("ping"), { method: "GET" }).then((data) => {
+        if (!Array.isArray(data.events) || !data.events.includes(key)) throw notReady();
+      });
+      eventConfirmed.catch(() => (eventConfirmed = null)); // ask again next time
+    }
+    return eventConfirmed;
+  }
+
+  async function getWishes() {
+    if (!isApiConfigured()) throw notReady();
+    const data = await call(getUrl("wishes"), { method: "GET" });
+    if (eventKey()) {
+      // An older script ignores `event` and would return another invitation's wishes.
+      if (data.event !== eventKey()) throw notReady();
+      eventConfirmed = Promise.resolve();
+    }
+    return data;
+  }
+
+  async function submitRsvp(payload) {
+    if (!isApiConfigured()) throw notReady();
+    await confirmEvent();
     return call(apiUrl(), {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({ action: "rsvp", ...payload }),
+      body: JSON.stringify({ action: "rsvp", ...(eventKey() ? { event: eventKey() } : {}), ...payload }),
     });
   }
 

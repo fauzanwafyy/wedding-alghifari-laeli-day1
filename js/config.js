@@ -236,11 +236,13 @@ const WEDDING_CONFIG = {
 
   /* --------------------------------------------------------------------- *
    *  RSVP & WEDDING WISHES (Google Apps Script backend)
-   *  Day 1 has its OWN Sheet (separate from Day 2). Paste its Web App URL
-   *  (ends with /exec) below. See docs/GOOGLE-SHEETS.md.
+   *  Same spreadsheet and Web App URL as the Day 2 invitation; Day 1's
+   *  RSVPs go to their own tab ("RSVP Day 1") because of `event` below.
+   *  See docs/GOOGLE-SHEETS.md.
    * --------------------------------------------------------------------- */
   rsvp: {
-    apiUrl: "",
+    apiUrl: "https://script.google.com/macros/s/AKfycbxAJ-qHfMK--DcGSp1C_9E1wrarz_hrWl2teccNZPfjWnxheVE5KCtGyzRTmHYj-7gm/exec",
+    event: "day1",                // tab "RSVP Day 1" in the shared spreadsheet (see EVENTS in Code.gs)
     closed: false,                // true = stop accepting RSVPs (wishes stay visible)
     maxGuests: 5,                 // max people per RSVP (including the guest)
     nameMaxLength: 80,

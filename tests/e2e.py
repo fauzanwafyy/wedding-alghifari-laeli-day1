@@ -25,6 +25,9 @@ TEST_DIR = "/tmp/claude-0/site-test"
 SITE_PORT = 8091
 EMU = "http://127.0.0.1:8787"
 FAKE_API = "https://script.google.com/macros/s/TEST_DEPLOYMENT/exec"
+# Day 1 shares the Day 2 spreadsheet; its RSVPs live in their own tab.
+DAY1_TAB = "/__sheet?name=RSVP%20Day%201"
+DAY2_TAB = "/__sheet?name=RSVP"
 SHOTS = "/tmp/claude-0/e2e"
 
 results = []
@@ -351,7 +354,7 @@ async def main():
         await page.screenshot(path=f"{SHOTS}/wishes-empty.png")
         await ctx.close()
 
-        emu("/__seed?n=12")
+        emu("/__seed?n=12&event=day1")
         ctx, page = await new_page(b)
         await open_invitation(page)
         await page.locator("#wishes").scroll_into_view_if_needed()
@@ -388,7 +391,7 @@ async def main():
         check("RSVP validation: name required", "nama" in err_name.lower(), err_name)
         check("RSVP validation: attendance required", "kehadiran" in err_att.lower(), err_att)
         check("RSVP validation: focus moves to first invalid field", await page.evaluate("document.activeElement.id") == "rsvp-name")
-        check("RSVP validation: nothing sent", len(emu("/__sheet")) <= 1)
+        check("RSVP validation: nothing sent", len(emu(DAY1_TAB)) <= 1)
         await page.screenshot(path=f"{SHOTS}/rsvp-validation.png", full_page=False)
 
         await page.fill("#rsvp-name", "Pujo Santoso")
@@ -400,7 +403,7 @@ async def main():
         await page.click("#rsvp-submit")
         await page.wait_for_selector("#rsvp-success:not([hidden])", timeout=8000)
         check("RSVP success panel shown", True)
-        rows = emu("/__sheet")
+        rows = emu(DAY1_TAB)
         check("RSVP creates exactly one new sheet row", len(rows) == 2, str(len(rows)))
         if len(rows) == 2:
             r = rows[1]
@@ -419,7 +422,7 @@ async def main():
         await page.click("#rsvp-submit")
         await page.wait_for_selector("#rsvp-success:not([hidden])", timeout=8000)
         txt = await page.text_content("#rsvp-success-text")
-        check("duplicate submission recognised, no new row", "sebelumnya" in txt and len(emu("/__sheet")) == 2, txt)
+        check("duplicate submission recognised, no new row", "sebelumnya" in txt and len(emu(DAY1_TAB)) == 2, txt)
         keys = await page.evaluate("Object.keys(localStorage)")
         check("RSVP memory uses the Day 1 key (separate from Day 2)", "awl-day1:rsvp" in keys and "awl:rsvp" not in keys, str(keys))
         await ctx.close()
@@ -454,7 +457,7 @@ async def main():
         fail_mode["on"] = False
         await page.click("#rsvp-submit")
         await page.wait_for_selector("#rsvp-success:not([hidden])", timeout=8000)
-        rows = emu("/__sheet")
+        rows = emu(DAY1_TAB)
         check("retry after lost response does NOT duplicate the row", len(rows) == 2, str(len(rows)))
         check("row: not attending → count 0, slug from link", rows[-1][3] == "Tidak Hadir" and rows[-1][4] == 0 and rows[-1][1] == "ade-partner", str(rows[-1]))
         await ctx.close()
@@ -488,6 +491,30 @@ async def main():
         await page.screenshot(path=f"{SHOTS}/rsvp-loading.png")
         await page.wait_for_selector("#rsvp-success:not([hidden])", timeout=12000)
         check("slow network eventually succeeds", True)
+        emu("/__mode?m=normal")
+        await ctx.close()
+
+        # Day 1 rows land in their own tab; the Day 2 tab is never touched
+        tabs = emu("/__sheets")
+        check("shared spreadsheet: Day 1 writes only to 'RSVP Day 1'", "RSVP Day 1" in tabs and "RSVP" not in tabs, str(tabs))
+
+        # live script not updated yet (no `event` support) → nothing is filed in the Day 2 tab
+        emu("/__reset")
+        emu("/__seed?n=2")  # Day 2 wishes already in the old script
+        emu("/__mode?m=legacy")
+        ctx, page = await new_page(b)
+        await open_invitation(page)
+        await page.locator("#wishes").scroll_into_view_if_needed()
+        await page.wait_for_selector("#wishes-state[data-kind='offline']", timeout=8000)
+        check("old script: Day 2 wishes are not shown on Day 1", await page.locator(".wish").count() == 0)
+        await page.locator("#rsvp").scroll_into_view_if_needed()
+        await page.fill("#rsvp-name", "Tes Skrip Lama")
+        await page.click("label.choice__opt:has(input[value=not_attending])")
+        await page.click("#rsvp-submit")
+        await page.wait_for_selector("#rsvp-status:not([hidden])", timeout=8000)
+        st = await page.text_content("#rsvp-status")
+        check("old script: RSVP says 'sedang disiapkan'", "disiapkan" in st, st)
+        check("old script: nothing written to the Day 2 tab", len(emu(DAY2_TAB)) == 3 and len(emu(DAY1_TAB)) == 0, f"{len(emu(DAY2_TAB))} {len(emu(DAY1_TAB))}")
         emu("/__mode?m=normal")
         await ctx.close()
 

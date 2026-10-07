@@ -4,62 +4,66 @@ The website is static (GitHub Pages), so RSVPs are stored in a **Google Sheet** 
 small **Google Apps Script Web App** (`google-apps-script/Code.gs`).
 
 ```
-Guest's browser ──POST /exec──▶ Apps Script (Code.gs) ──new row──▶ Google Sheet, tab "RSVP"
-                ◀─GET ?action=wishes── name + message only ◀──────────┘
+Guest's browser ──POST /exec {event:"day1"}──▶ Apps Script (Code.gs) ──new row──▶ tab "RSVP Day 1"
+                ◀─GET ?action=wishes&event=day1── name + message only ◀──────────┘
 ```
 
 Nothing secret is ever placed in the website: the Web App URL only accepts RSVPs and
 returns public wishes.
 
-## Day 1 setup
+## Day 1 setup: shared with Day 2, separate tab
 
-Day 1 has its **own** spreadsheet and its own Apps Script deployment, separate from the Day 2
-invitation, so the two guest lists and wish walls never mix. The script code is the same
-`google-apps-script/Code.gs`.
+Both invitations use **one spreadsheet and one Apps Script deployment** (the one made for the
+Day 2 invitation). Each invitation has its own tab, picked by `rsvp.event` in `js/config.js`:
+
+| Invitation | `rsvp.event` | Tab | Header colours |
+|---|---|---|---|
+| Day 2 (Akad + Resepsi, 21 Oct) | *(not sent)* | **RSVP** (the original tab) | black / cream |
+| Day 1 (Resepsi, 20 Oct) | `"day1"` | **RSVP Day 1** | olive / white |
+
+The tabs live in `EVENTS` at the top of `Code.gs`. A request without `event` goes to the Day 2
+tab, so the live Day 2 site keeps working without any change. Guest lists, duplicate checks,
+spam limits and the wish walls are all kept per tab: Day 1 guests never see Day 2 wishes.
 
 | Item | Value |
 |---|---|
-| Google account (owner) | the Google account that runs the setup (not written here, since this repo is public) |
-| Spreadsheet | **RSVP - Undangan Day 1 Alghifari & Laeli** (tab **RSVP**, created by `setup`) |
-| Apps Script project | **RSVP Undangan Day 1 Alghifari & Laeli**, *bound* to that spreadsheet (Ekstensi → Apps Script), `@OnlyCurrentDoc` |
-| Deployment | Web app · **Jalankan sebagai: Saya** · **Yang memiliki akses: Siapa saja** |
-| Web App URL | goes into `js/config.js` → `rsvp.apiUrl` once deployed. **Status: pending** (`apiUrl` is still `""`, so the form shows *"Formulir RSVP sedang disiapkan"*) |
+| Google account (owner) | the account that owns the Day 2 RSVP sheet (not written here, since this repo is public) |
+| Spreadsheet | **RSVP - Undangan Alghifari & Laeli** (the Day 2 one) |
+| Apps Script project | the one *bound* to that spreadsheet (Ekstensi → Apps Script), `@OnlyCurrentDoc` |
+| Deployment | the existing Web app · **Jalankan sebagai: Saya** · **Yang memiliki akses: Siapa saja** |
+| Web App URL | same URL as Day 2, already in `js/config.js` → `rsvp.apiUrl` |
 
-Do **not** reuse the Day 2 Web App URL here: Day 1 RSVPs would land in the Day 2 sheet.
+**Safety net.** Before sending anything, the Day 1 site asks the script whether it knows the
+`day1` tab (`?action=ping` must list it under `events`). While the live script is still the
+older single-tab version, the form shows *"Formulir RSVP sedang disiapkan"*, the wishes show
+*"sedang disiapkan"*, and nothing is written, so a Day 1 RSVP can never land in the Day 2 tab.
 
 The sheet itself is private (only the owner can open it). The Web App runs as the owner,
 so guests can submit without access to the sheet.
-
-The sections below describe how to set it up from scratch.
 Google's menus are shown in English with the Indonesian label in brackets.
 
 ---
 
-## 1. Create the spreadsheet
+## 1. Put the new script in the existing spreadsheet (one time)
 
-1. Go to <https://sheets.new> (signed in with the Google account that should own the data).
-2. Rename it **RSVP - Undangan Day 1 Alghifari & Laeli**.
+1. Open the Day 2 spreadsheet **RSVP - Undangan Alghifari & Laeli**.
+2. **Extensions → Apps Script** (*Ekstensi → Apps Script*).
+3. Select everything in the editor and delete it. Open `google-apps-script/Code.gs` from this
+   repository, copy **everything**, paste it in, then click **Save** (💾).
+4. In the toolbar function dropdown choose **`setup`** → **Run**. It creates and formats the
+   **RSVP Day 1** tab and re-formats **RSVP**. Existing RSVPs are kept.
+   If Google asks for permission again: **Review permissions** → your account → **Advanced** →
+   **Go to RSVP… (unsafe)** → **Allow** (your own script; the warning appears for every
+   personal script).
+5. **Deploy → Manage deployments** (*Terapkan → Kelola deployment*) → ✏️ (edit) →
+   **Version: New version** (*Versi: Versi baru*) → **Deploy** (*Terapkan*).
+   Do **not** use *New deployment*: that makes a new URL and Day 2 would stop receiving RSVPs.
 
-## 2. Add the script
+**Check:** open `<Web App URL>?action=ping`. The answer must contain
+`"events":["day2","day1"]`. Once it does, the Day 1 form works straight away (no change to
+the website needed).
 
-1. In the sheet: **Extensions → Apps Script** (*Ekstensi → Apps Script*). Open it **from the
-   sheet**, not from script.google.com, so the script is bound to this sheet.
-2. Delete the sample `function myFunction() {}`.
-3. Open `google-apps-script/Code.gs` from this repository, copy **everything**, paste it in.
-4. Click **Save** (💾). Name the project *RSVP Undangan Day 1 Alghifari & Laeli*.
-
-> Because the script is opened from inside the sheet ("bound"), you do **not** need to paste
-> a spreadsheet ID. Leave `SPREADSHEET_ID: ''`.
-> (Only if you create a standalone script at script.google.com: put the ID from the sheet URL
-> `https://docs.google.com/spreadsheets/d/<THIS_PART>/edit` into `SPREADSHEET_ID`.)
-
-## 3. Run setup once
-
-1. In the toolbar function dropdown choose **`setup`** → **Run**.
-2. Google asks for permission: **Review permissions** → choose your account →
-   *"Google hasn't verified this app"* → **Advanced** → **Go to RSVP… (unsafe)** → **Allow**.
-   (It's your own script. The warning appears for every personal script.)
-3. The sheet now has an **RSVP** tab with these columns:
+Both tabs have the same columns:
 
 | Column | Content | Public? |
 |---|---|---|
@@ -72,44 +76,25 @@ Google's menus are shown in English with the Indonesian label in brackets.
 | G · Submission ID | Random ID used to prevent duplicates | No |
 | H · Show on Website | ☑ = wish visible. Untick to hide a wish | No |
 
-Permissions requested: *see, edit, create spreadsheets* (to write RSVPs) and *connect to an
-external service / run when you're not present* (to serve the Web App).
+## 2. Test it
 
-## 4. Deploy as a Web App
+1. Open the Day 1 invitation with `?to=qa-test`, submit an RSVP with a message.
+2. A new row appears in the **RSVP Day 1** tab (not in **RSVP**) within a second or two.
+3. The wish appears under **Doa & Ucapan** on Day 1 only.
+4. Run **`removeTestRows`** in the editor: it deletes rows whose Invitation Slug is `selftest`
+   or `qa-test` in every tab, never real RSVPs.
 
-1. **Deploy → New deployment** (*Terapkan → Deployment baru*).
-2. Click ⚙ next to "Select type" → **Web app** (*Aplikasi web*).
-3. Settings:
-   - **Description:** `RSVP Day 1 v1`
-   - **Execute as:** **Me** (*Saya*): your account, so the script can write to your sheet
-   - **Who has access:** **Anyone** (*Siapa saja*): guests aren't signed in; this is required
-4. **Deploy** → copy the **Web app URL**. It looks like
-   `https://script.google.com/macros/s/AKfycb…/exec`
+## Adding another invitation later
 
-**Quick check:** open `<your URL>?action=ping` in a browser. You should see
-`{"ok":true,"time":"…"}`.
+Add a line to `EVENTS` in `Code.gs` (key, tab name, header colours), paste, **Save**, run
+**`setup`**, deploy a **New version**, then set that key as `rsvp.event` on the new site.
 
-## 5. Connect the website
+## Starting from scratch (only if the shared spreadsheet is ever lost)
 
-1. Open `js/config.js`.
-2. Paste the URL into `apiUrl` (empty `""` until Day 1 is deployed):
-   ```js
-   rsvp: {
-     apiUrl: "https://script.google.com/macros/s/AKfycb…/exec",
-   ```
-3. Commit & push (see `DEPLOYMENT.md`). The RSVP form and the wishes (*Doa & Ucapan*) go live
-   automatically. Until a valid URL is set, the form politely says it's being prepared.
-
-## 6. Test it
-
-1. Open the invitation, submit an RSVP with a message.
-2. A new row appears in the sheet within a second or two.
-3. The wish appears under **Doa & Ucapan** immediately for you, and for other guests within
-   ~30 seconds (they poll while the section is on screen).
-
-You can also run **`selfTest`** in the editor: it writes one test row ("Self Test") and logs
-the responses. Afterwards run **`removeTestRows`**: it deletes only rows whose Invitation Slug
-is `selftest` or `qa-test`, never real RSVPs.
+Create a sheet at <https://sheets.new>, open **Extensions → Apps Script** from inside it, paste
+`Code.gs`, **Save**, run **`setup`** (creates both tabs), then **Deploy → New deployment → ⚙ Web
+app**, *Execute as: Me*, *Who has access: Anyone*. Put the new `/exec` URL into `rsvp.apiUrl`
+on **both** sites (Day 2 and Day 1).
 
 ---
 
@@ -144,18 +129,20 @@ Untick **Show on Website** (column H) on any row. The wish disappears from the s
 | Double taps / retries | Each attempt carries a random `submissionId`; repeats are answered `duplicate` and **not** stored. Identical re-sends within 10 minutes are also ignored. |
 | Spam | Hidden honeypot field + max 6 submissions per name/invitation per 10 minutes. |
 | Concurrency | `LockService` serialises writes, so no rows are lost when many guests submit at once. |
-| Privacy | `?action=wishes` returns only `name` + `message` (+ an opaque id). Attendance, counts, timestamps and slugs never leave the sheet. |
-| Load | Public wishes cached for 20 s, so polling stays cheap. |
+| Privacy | `?action=wishes` returns only `name` + `message` (+ an opaque id) from the requested invitation's tab. Attendance, counts, timestamps and slugs never leave the sheet. |
+| Load | Public wishes cached for 20 s per tab, so polling stays cheap. |
+| Unknown invitation | An `event` that isn't in `EVENTS` is rejected; no tab is created. |
 | Row placement | New RSVPs go into the first empty row under the data (judged by column A), not via `appendRow`. Checkboxes are added per row. A checkbox column pre-filled down the sheet fills empty rows with FALSE, which made `appendRow` write at row 1001+. `setup` now clears those leftovers. |
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
-| Form says *"sedang disiapkan"* | `rsvp.apiUrl` in `js/config.js` is still empty or doesn't end in `/exec`. |
+| Form says *"sedang disiapkan"* | `rsvp.apiUrl` in `js/config.js` is empty or doesn't end in `/exec`, **or** the live script is still the old single-tab version: `?action=ping` doesn't list `day1`. Do step 1 above (paste, Save, `setup`, New version). |
 | `?action=ping` asks you to sign in | Deployment access isn't **Anyone**. Edit the deployment. |
 | Error *"Maaf, terjadi kendala pada server"* | Open Apps Script → **Executions** to see the error. Usually the `setup` authorisation wasn't completed. |
 | Changes to Code.gs have no effect | Deploy a **New version** of the existing deployment (see above). |
 | Wishes don't update | Wait ~30 s (cache + polling). Check column H is ticked. |
 | New rows appear far below (row 1000+) | Someone filled column H with checkboxes for the whole sheet. Run **`setup`** once: it removes checkboxes/FALSE from empty rows. Existing rows are kept. |
-| Need to delete test submissions | Use Invitation Slug `qa-test` for tests, then run **`removeTestRows`**. |
+| Need to delete test submissions | Use Invitation Slug `qa-test` for tests, then run **`removeTestRows`** (cleans every tab). |
+| A Day 1 RSVP is in the **RSVP** tab | Cannot happen with this site version (see *Safety net*). If you see one, it came from the Day 2 site. |

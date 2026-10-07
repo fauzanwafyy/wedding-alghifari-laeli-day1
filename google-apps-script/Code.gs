@@ -4,9 +4,12 @@
 
 /**
  * ============================================================================
- *  RSVP + Wedding Wishes backend
- *  Resepsi Pernikahan Alghifari & Laeli (Day 1) · 20 October 2026
- *  Uses its OWN spreadsheet, separate from the Day 2 invitation.
+ *  RSVP + Wedding Wishes backend for BOTH invitations of Alghifari & Laeli
+ *    Day 1 · Resepsi, 20 October 2026     → tab "RSVP Day 1"
+ *    Day 2 · Akad + Resepsi, 21 October 2026 → tab "RSVP" (the original tab)
+ *  One spreadsheet, one Web App URL, one tab per invitation. The website sends
+ *  `event` ("day1" / "day2"); a request without `event` is Day 2, so the Day 2
+ *  site keeps working unchanged.
  *
  *  Google Sheets (database) ← Google Apps Script Web App (this file) ← website
  *
@@ -16,12 +19,15 @@
  *   3. Deploy → New deployment → Web app
  *        Execute as: Me    ·    Who has access: Anyone
  *   4. Copy the Web App URL (ends with /exec) into js/config.js → rsvp.apiUrl
+ *  Updating this file later: paste, Save, run 'setup' (creates missing tabs),
+ *  then Deploy → Manage deployments → Edit → Version: New version → Deploy.
+ *  Editing the existing deployment keeps the same URL for both sites.
  *
  *  Endpoints
- *   GET  ?action=wishes   → { ok, total, wishes: [{ id, name, message }] }  (public data only)
- *   GET  ?action=ping     → { ok, time }
+ *   GET  ?action=wishes&event=day1 → { ok, event, total, wishes: [{ id, name, message }] }  (public data only)
+ *   GET  ?action=ping     → { ok, time, events: ["day2", "day1"] }
  *   POST (JSON body, Content-Type text/plain)
- *        { action:"rsvp", submissionId, invitationSlug, guestName,
+ *        { action:"rsvp", event, submissionId, invitationSlug, guestName,
  *          attendance:"attending"|"not_attending", guestCount, message, website }
  *        → { ok:true, status:"created"|"duplicate" } | { ok:false, error, field? }
  *
@@ -33,7 +39,6 @@
 
 var SETTINGS = {
   SPREADSHEET_ID: '',          // Keep '' : the script is attached to the RSVP sheet (with @OnlyCurrentDoc).
-  SHEET_NAME: 'RSVP',
   TIMEZONE: 'Asia/Jakarta',
   MAX_NAME: 80,
   MAX_MESSAGE: 500,
@@ -49,20 +54,45 @@ var SETTINGS = {
 var HEADERS = ['Timestamp', 'Invitation Slug', 'Guest Name', 'Attendance', 'Guest Count',
   'Wedding Message', 'Submission ID', 'Show on Website'];
 var COL = { TS: 1, SLUG: 2, NAME: 3, ATT: 4, COUNT: 5, MSG: 6, SID: 7, SHOW: 8 };
-var WISHES_CACHE_KEY = 'wishes:v1';
+
+/**
+ * One tab per invitation. The first entry is the default for requests without
+ * `event` (the Day 2 site, which was live before Day 1 existed).
+ * To add an invitation: add a line here, then run 'setup'.
+ */
+var EVENTS = {
+  day2: { sheet: 'RSVP',       header: ['#17130F', '#F2E8D8'] },  // Akad + Resepsi, 21 Oct (original tab)
+  day1: { sheet: 'RSVP Day 1', header: ['#2F3322', '#F4F2EA'] }   // Resepsi, 20 Oct
+};
+var DEFAULT_EVENT = 'day2';
+
+/** "day1" → "day1"; empty → default; anything else → validation error. */
+function eventKey_(raw) {
+  var key = String(raw == null ? '' : raw).trim().toLowerCase();
+  if (!key) return DEFAULT_EVENT;
+  if (!Object.prototype.hasOwnProperty.call(EVENTS, key)) throw validationError_('event', 'Undangan tidak dikenal.');
+  return key;
+}
+
+function wishesCacheKey_(event) {
+  return 'wishes:v2:' + event;
+}
 
 /* =============================================================== HTTP == */
 
 function doGet(e) {
   try {
-    var action = (e && e.parameter && e.parameter.action) || 'wishes';
+    var params = (e && e.parameter) || {};
+    var action = params.action || 'wishes';
     if (action === 'wishes') {
-      var result = getPublicWishes_();
-      return json_({ ok: true, total: result.total, wishes: result.wishes });
+      var event = eventKey_(params.event);
+      var result = getPublicWishes_(event);
+      return json_({ ok: true, event: event, total: result.total, wishes: result.wishes });
     }
-    if (action === 'ping') return json_({ ok: true, time: new Date().toISOString() });
+    if (action === 'ping') return json_({ ok: true, time: new Date().toISOString(), events: Object.keys(EVENTS) });
     return json_({ ok: false, error: 'Unknown action.' });
   } catch (err) {
+    if (err && err.isValidation) return json_({ ok: false, error: err.message, field: err.field });
     console.error(err);
     return json_({ ok: false, error: 'Server error.' });
   }
@@ -82,7 +112,7 @@ function doPost(e) {
     lock = LockService.getScriptLock();
     lock.waitLock(15000);
 
-    var sheet = getSheet_();
+    var sheet = getSheet_(data.event);
     if (isDuplicate_(sheet, data)) return json_({ ok: true, status: 'duplicate' });
     if (isRateLimited_(data)) {
       return json_({ ok: false, error: 'Terlalu banyak percobaan. Silakan coba lagi beberapa menit lagi.' });
@@ -102,7 +132,7 @@ function doPost(e) {
 
     var cache = CacheService.getScriptCache();
     cache.put('sid:' + data.submissionId, '1', 21600);
-    cache.remove(WISHES_CACHE_KEY);
+    cache.remove(wishesCacheKey_(data.event));
 
     return json_({ ok: true, status: 'created' });
   } catch (err) {
@@ -148,6 +178,7 @@ function charLength_(s) {
 }
 
 function validate_(body) {
+  var event = eventKey_(body.event);
   var name = cleanLine_(body.guestName);
   if (!name) throw validationError_('guestName', 'Mohon isi nama lengkap Anda.');
   if (charLength_(name) < 2) throw validationError_('guestName', 'Nama terlalu pendek.');
@@ -178,6 +209,7 @@ function validate_(body) {
   if (!/^[A-Za-z0-9-]{8,64}$/.test(submissionId)) submissionId = Utilities.getUuid();
 
   return {
+    event: event,
     name: name,
     attendance: attendance,
     attendanceLabel: attendance === 'attending' ? 'Hadir' : 'Tidak Hadir',
@@ -208,10 +240,11 @@ function getSpreadsheet_() {
     : SpreadsheetApp.getActiveSpreadsheet();
 }
 
-function getSheet_() {
+function getSheet_(event) {
   var ss = getSpreadsheet_();
-  var sheet = ss.getSheetByName(SETTINGS.SHEET_NAME);
-  if (!sheet) sheet = ss.insertSheet(SETTINGS.SHEET_NAME);
+  var name = EVENTS[event || DEFAULT_EVENT].sheet;
+  var sheet = ss.getSheetByName(name);
+  if (!sheet) sheet = ss.insertSheet(name);
   if (sheet.getLastRow() === 0) {
     sheet.appendRow(HEADERS);
     sheet.setFrozenRows(1);
@@ -279,7 +312,7 @@ function isDuplicate_(sheet, data) {
 function isRateLimited_(data) {
   var cache = CacheService.getScriptCache();
   var key = 'rl:' + Utilities.base64EncodeWebSafe(
-    Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, data.slug + '|' + data.name.toLowerCase(), Utilities.Charset.UTF_8));
+    Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, data.event + '|' + data.slug + '|' + data.name.toLowerCase(), Utilities.Charset.UTF_8));
   var count = Number(cache.get(key) || 0) + 1;
   cache.put(key, String(count), SETTINGS.RATE_LIMIT_WINDOW_SEC);
   return count > SETTINGS.RATE_LIMIT_COUNT;
@@ -287,12 +320,12 @@ function isRateLimited_(data) {
 
 /* ===================================================== PUBLIC WISHES == */
 
-function getPublicWishes_() {
+function getPublicWishes_(event) {
   var cache = CacheService.getScriptCache();
-  var cached = cache.get(WISHES_CACHE_KEY);
+  var cached = cache.get(wishesCacheKey_(event));
   if (cached) return JSON.parse(cached);
 
-  var sheet = getSheet_();
+  var sheet = getSheet_(event);
   var recent = recentRows_(sheet, 3000);
   var wishes = [];
   for (var i = recent.rows.length - 1; i >= 0; i--) {
@@ -310,7 +343,7 @@ function getPublicWishes_() {
   }
   var result = { total: wishes.length, wishes: wishes.slice(0, SETTINGS.MAX_PUBLIC_WISHES) };
   try {
-    cache.put(WISHES_CACHE_KEY, JSON.stringify(result), SETTINGS.WISHES_CACHE_SEC);
+    cache.put(wishesCacheKey_(event), JSON.stringify(result), SETTINGS.WISHES_CACHE_SEC);
   } catch (ignore) { /* value too large for cache: skip caching */ }
   return result;
 }
@@ -335,15 +368,23 @@ function json_(obj) {
 /* ============================================== ONE-TIME SETUP (run me) == */
 
 /**
- * Run once from the Apps Script editor (select 'setup' → Run).
- * Creates/formats the RSVP sheet and sets the spreadsheet timezone.
+ * Run once from the Apps Script editor (select 'setup' → Run), and again after
+ * adding an invitation to EVENTS. Creates/formats one tab per invitation and
+ * sets the spreadsheet timezone. Safe to re-run: existing RSVPs are kept.
  */
 function setup() {
   var ss = getSpreadsheet_();
   ss.setSpreadsheetTimeZone(SETTINGS.TIMEZONE);
-  var sheet = getSheet_();
+  Object.keys(EVENTS).forEach(function (event) {
+    formatSheet_(getSheet_(event), EVENTS[event].header);
+    CacheService.getScriptCache().remove(wishesCacheKey_(event));
+  });
+  Logger.log('RSVP tabs ready (' + Object.keys(EVENTS).map(function (k) { return EVENTS[k].sheet; }).join(', ') + '): ' + ss.getUrl());
+}
+
+function formatSheet_(sheet, colors) {
   var header = sheet.getRange(1, 1, 1, HEADERS.length);
-  header.setValues([HEADERS]).setFontWeight('bold').setBackground('#17130F').setFontColor('#F2E8D8');
+  header.setValues([HEADERS]).setFontWeight('bold').setBackground(colors[0]).setFontColor(colors[1]);
   sheet.setFrozenRows(1);
   sheet.setColumnWidth(COL.TS, 160);
   sheet.setColumnWidth(COL.SLUG, 160);
@@ -363,30 +404,30 @@ function setup() {
   sheet.getRange(2, COL.SHOW, max - 1, 1).clearDataValidations();
   if (last < max) sheet.getRange(last + 1, COL.SHOW, max - last, 1).clearContent();
   if (last >= 2) sheet.getRange(2, COL.SHOW, last - 1, 1).setDataValidation(checkboxRule_());
-  CacheService.getScriptCache().remove(WISHES_CACHE_KEY);
-  Logger.log('RSVP sheet ready: ' + ss.getUrl());
 }
 
 /**
  * Maintenance: run from the editor to delete test rows (Invitation Slug
- * "selftest" or "qa-test", e.g. rows created by selfTest()). Real RSVPs are
- * never touched.
+ * "selftest" or "qa-test", e.g. rows created by selfTest()) from every tab.
+ * Real RSVPs are never touched.
  */
 function removeTestRows() {
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
-    var sheet = getSheet_();
-    var last = lastDataRow_(sheet);
     var removed = 0;
-    if (last >= 2) {
-      var slugs = sheet.getRange(2, COL.SLUG, last - 1, 1).getValues();
-      for (var i = slugs.length - 1; i >= 0; i--) {
-        var slug = String(slugs[i][0]);
-        if (slug === 'selftest' || slug === 'qa-test') { sheet.deleteRow(i + 2); removed++; }
+    Object.keys(EVENTS).forEach(function (event) {
+      var sheet = getSheet_(event);
+      var last = lastDataRow_(sheet);
+      if (last >= 2) {
+        var slugs = sheet.getRange(2, COL.SLUG, last - 1, 1).getValues();
+        for (var i = slugs.length - 1; i >= 0; i--) {
+          var slug = String(slugs[i][0]);
+          if (slug === 'selftest' || slug === 'qa-test') { sheet.deleteRow(i + 2); removed++; }
+        }
       }
-    }
-    CacheService.getScriptCache().remove(WISHES_CACHE_KEY);
+      CacheService.getScriptCache().remove(wishesCacheKey_(event));
+    });
     Logger.log('Removed ' + removed + ' test row(s).');
   } finally {
     lock.releaseLock();

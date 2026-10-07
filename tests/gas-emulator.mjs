@@ -124,7 +124,7 @@ export function loadGas() {
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   const port = Number(process.argv[2] || 8787);
   const gas = loadGas();
-  let mode = "normal"; // normal | fail500 | slow | reject | down
+  let mode = "normal"; // normal | fail500 | slow | reject | down | legacy (pre-`event` script)
   const send = (res, status, body) => {
     res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Access-Control-Allow-Origin": "*" });
     res.end(body);
@@ -132,13 +132,15 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
   http.createServer((req, res) => {
     const url = new URL(req.url, `http://localhost:${port}`);
     if (url.pathname === "/__mode") { mode = url.searchParams.get("m") || "normal"; return send(res, 200, JSON.stringify({ mode })); }
-    if (url.pathname === "/__sheet") return send(res, 200, JSON.stringify(gas.sheets.get("RSVP")?.rows || []));
+    if (url.pathname === "/__sheet") return send(res, 200, JSON.stringify(gas.sheets.get(url.searchParams.get("name") || "RSVP")?.rows || []));
+    if (url.pathname === "/__sheets") return send(res, 200, JSON.stringify([...gas.sheets.keys()]));
     if (url.pathname === "/__reset") { gas.sheets.clear(); gas.cacheStore.clear(); return send(res, 200, "{}"); }
     if (url.pathname === "/__seed") {
       // seed N wishes
       const n = Number(url.searchParams.get("n") || 3);
+      const event = url.searchParams.get("event") || "";
       for (let i = 0; i < n; i++) {
-        gas.ctx.doPost({ postData: { contents: JSON.stringify({ submissionId: `seed-${Date.now()}-${i}`, invitationSlug: "seed", guestName: `Tamu Contoh ${i + 1}`, attendance: i % 2 ? "not_attending" : "attending", guestCount: 1, message: `Selamat menempuh hidup baru! Semoga sakinah, mawaddah, warahmah. (${i + 1})` }) } });
+        gas.ctx.doPost({ postData: { contents: JSON.stringify({ event, submissionId: `seed-${Date.now()}-${i}`, invitationSlug: "seed", guestName: `Tamu Contoh ${i + 1}`, attendance: i % 2 ? "not_attending" : "attending", guestCount: 1, message: `Selamat menempuh hidup baru! Semoga sakinah, mawaddah, warahmah. (${i + 1})` }) } });
       }
       gas.cacheStore.clear();
       return send(res, 200, JSON.stringify({ seeded: n }));
@@ -150,10 +152,24 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
         if (mode === "down") { req.socket.destroy(); return; }
         if (mode === "fail500") return send(res, 500, "<html>Error</html>");
         if (mode === "reject") return send(res, 200, JSON.stringify({ ok: false, error: "Simulasi: server menolak permintaan." }));
+        const params = Object.fromEntries(url.searchParams);
+        if (mode === "legacy") {
+          // The script as it was before one-tab-per-invitation: `event` is ignored
+          // (everything lands in the default tab) and responses don't mention it.
+          delete params.event;
+          try { const b = JSON.parse(body); delete b.event; body = JSON.stringify(b); } catch { /* not JSON */ }
+        }
         const out = req.method === "POST"
-          ? gas.ctx.doPost({ postData: { contents: body, type: req.headers["content-type"] }, parameter: Object.fromEntries(url.searchParams) })
-          : gas.ctx.doGet({ parameter: Object.fromEntries(url.searchParams) });
-        send(res, 200, out.getContent());
+          ? gas.ctx.doPost({ postData: { contents: body, type: req.headers["content-type"] }, parameter: params })
+          : gas.ctx.doGet({ parameter: params });
+        let content = out.getContent();
+        if (mode === "legacy") {
+          const o = JSON.parse(content);
+          delete o.event;
+          delete o.events;
+          content = JSON.stringify(o);
+        }
+        send(res, 200, content);
       };
       if (mode === "slow") setTimeout(run, 4000); else run();
     });
