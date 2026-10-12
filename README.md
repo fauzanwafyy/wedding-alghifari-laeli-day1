@@ -4,7 +4,8 @@ Digital invitation to the wedding reception of **Moh Agil Alghifari & Laeli Lusp
 **Resepsi** · Selasa, 20 Oktober 2026 · 09.00–21.00 WIB · Le Villa Resort and Conference,
 Kopo, Cisarua, Bogor. Hosted by the groom's family.
 
-Site address (GitHub Pages): <https://fauzanwafyy.github.io/wedding-alghifari-laeli-day1/>. The second day
+Site address (GitHub Pages, custom domain): <https://day1.onepercent.my.id/>
+(the old address <https://fauzanwafyy.github.io/wedding-alghifari-laeli-day1/> redirects there). The second day
 (Rabu, 21 Oktober 2026) has its own invitation (Day 2):
 <https://fauzanwafyy.github.io/wedding-alghifari-laeli/>.
 
